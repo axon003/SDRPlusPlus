@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <utils/flog.h>
 #include <module.h>
 #include <gui/gui.h>
@@ -93,10 +94,17 @@ public:
         selectByName(selectedDevName);
 
         sigpath::sourceManager.registerSource("RTL-SDR", &handler);
+
+        if (!serverMode) {
+            keyHandler.ctx = this;
+            keyHandler.handler = shortcutHandler;
+            gui::waterfall.onFFTRedraw.bindHandler(&keyHandler);
+        }
     }
 
     ~RTLSDRSourceModule() {
         stop(this);
+        if (!serverMode) { gui::waterfall.onFFTRedraw.unbindHandler(&keyHandler); }
         sigpath::sourceManager.unregisterSource("RTL-SDR");
     }
 
@@ -278,12 +286,39 @@ private:
 
     static void menuSelected(void* ctx) {
         RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
+        _this->selected = true;
         core::setInputSampleRate(_this->sampleRate);
         flog::info("RTLSDRSourceModule '{0}': Menu Select!", _this->name);
     }
 
+    // Keyboard shortcut: G / Shift+G = RF gain up / down (only while this source is selected)
+    static void shortcutHandler(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
+        RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
+        if (!_this->selected || _this->gainList.empty() || !gui::mainWindow.shortcutsAllowed() || !ImGui::IsKeyPressed(ImGuiKey_G)) { return; }
+        if (_this->tunerAgc) {
+            gui::mainWindow.showOsd("Gain: Tuner AGC is on");
+            return;
+        }
+        bool down = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+        _this->gainId = std::clamp<int>(_this->gainId + (down ? -1 : 1), 0, (int)_this->gainList.size() - 1);
+        _this->updateGainTxt();
+        if (_this->running) {
+            rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+        }
+        if (_this->selectedDevName != "") {
+            config.acquire();
+            config.conf["devices"][_this->selectedDevName]["gain"] = _this->gainId;
+            config.release(true);
+        }
+        gui::mainWindow.showOsd(std::string("Gain ") + _this->dbTxt);
+    }
+
+    EventHandler<ImGui::WaterFall::FFTRedrawArgs> keyHandler;
+    bool selected = false;
+
     static void menuDeselected(void* ctx) {
         RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
+        _this->selected = false;
         flog::info("RTLSDRSourceModule '{0}': Menu Deselect!", _this->name);
     }
 

@@ -239,6 +239,17 @@ void SinkManager::setStreamSink(std::string name, std::string providerName) {
     }
 }
 
+bool SinkManager::toggleStreamMute(std::string name) {
+    if (streams.find(name) == streams.end()) { return false; }
+    Stream* stream = streams[name];
+    bool muted = !stream->volumeAjust.getMuted();
+    stream->volumeAjust.setMuted(muted);
+    core::configManager.acquire();
+    saveStreamConfig(name);
+    core::configManager.release(true);
+    return muted;
+}
+
 void SinkManager::showVolumeSlider(std::string name, std::string prefix, float width, float btnHeight, int btnBorder, bool sameLine) {
     // TODO: Replace map with some hashmap for it to be faster
     float height = ImGui::GetTextLineHeightWithSpacing() + 2;

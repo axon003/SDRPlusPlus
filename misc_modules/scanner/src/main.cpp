@@ -18,9 +18,14 @@ public:
     ScannerModule(std::string name) {
         this->name = name;
         gui::menu.registerEntry(name, menuHandler, this, NULL);
+
+        keyHandler.ctx = this;
+        keyHandler.handler = shortcutHandler;
+        gui::waterfall.onFFTRedraw.bindHandler(&keyHandler);
     }
 
     ~ScannerModule() {
+        gui::waterfall.onFFTRedraw.unbindHandler(&keyHandler);
         gui::menu.removeEntry(name);
         stop();
     }
@@ -120,6 +125,22 @@ private:
             }
         }
     }
+
+    // Keyboard shortcut: S = start / stop scanning
+    static void shortcutHandler(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
+        ScannerModule* _this = (ScannerModule*)ctx;
+        if (!_this->enabled || !gui::mainWindow.shortcutsAllowed() || !ImGui::IsKeyPressed(ImGuiKey_S, false)) { return; }
+        if (_this->running) {
+            _this->stop();
+            gui::mainWindow.showOsd("Scanner STOP");
+        }
+        else {
+            _this->start();
+            gui::mainWindow.showOsd("Scanner START");
+        }
+    }
+
+    EventHandler<ImGui::WaterFall::FFTRedrawArgs> keyHandler;
 
     void start() {
         if (running) { return; }

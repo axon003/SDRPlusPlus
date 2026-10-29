@@ -29,6 +29,12 @@ public:
     bool isPlaying();
 
     bool lockWaterfallControls = false;
+    // Keyboard shortcuts (also used by modules)
+    bool shortcutsAllowed();
+    void showOsd(std::string text);
+    std::string osdText = "";
+    double osdTime = 0.0;
+    bool showShortcutHelp = false;
     bool playButtonLocked = false;
 
     Event<bool> onPlayStateChange;

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <imgui.h>
 #include <utils/flog.h>
 #include <module.h>
@@ -602,8 +603,47 @@ private:
         }
     }
 
+    // Keyboard shortcuts: ',' / '.' = previous / next bookmark of the selected list (wraps around)
+    void handleShortcuts() {
+        if (!enabled || bookmarks.empty() || !gui::mainWindow.shortcutsAllowed()) { return; }
+        bool prev = ImGui::IsKeyPressed(ImGuiKey_Comma);
+        bool next = ImGui::IsKeyPressed(ImGuiKey_Period);
+        if (!prev && !next) { return; }
+
+        std::string vfoName = gui::waterfall.selectedVFO;
+        double current = gui::waterfall.getCenterFrequency();
+        if (!vfoName.empty() && gui::waterfall.vfos.find(vfoName) != gui::waterfall.vfos.end()) {
+            current += gui::waterfall.vfos[vfoName]->generalOffset;
+        }
+
+        std::vector<std::pair<std::string, FrequencyBookmark>> sorted(bookmarks.begin(), bookmarks.end());
+        std::sort(sorted.begin(), sorted.end(), [](const std::pair<std::string, FrequencyBookmark>& a, const std::pair<std::string, FrequencyBookmark>& b) {
+            return a.second.frequency < b.second.frequency;
+        });
+
+        int id = -1;
+        if (next) {
+            for (int i = 0; i < (int)sorted.size(); i++) {
+                if (sorted[i].second.frequency > current + 1.0) { id = i; break; }
+            }
+            if (id < 0) { id = 0; }
+        }
+        else {
+            for (int i = (int)sorted.size() - 1; i >= 0; i--) {
+                if (sorted[i].second.frequency < current - 1.0) { id = i; break; }
+            }
+            if (id < 0) { id = (int)sorted.size() - 1; }
+        }
+
+        applyBookmark(sorted[id].second, vfoName);
+        char buf[512];
+        snprintf(buf, sizeof(buf), "%s  %.4f MHz", sorted[id].first.c_str(), sorted[id].second.frequency / 1e6);
+        gui::mainWindow.showOsd(buf);
+    }
+
     static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
         FrequencyManagerModule* _this = (FrequencyManagerModule*)ctx;
+        _this->handleShortcuts();
         if (_this->bookmarkDisplayMode == BOOKMARK_DISP_MODE_OFF) { return; }
 
         if (_this->bookmarkDisplayMode == BOOKMARK_DISP_MODE_TOP) {

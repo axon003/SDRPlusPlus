@@ -27,6 +27,9 @@
 #include <gui/colormaps.h>
 #include <gui/widgets/snr_meter.h>
 #include <gui/tuner.h>
+#include <algorithm>
+#include <cmath>
+#include "../../../decoder_modules/radio/src/radio_interface.h"
 
 void MainWindow::init() {
     LoadingScreen::show("Initializing UI");
@@ -547,20 +550,63 @@ void MainWindow::draw() {
 
     gui::waterfall.draw();
 
+    if (!osdText.empty() && ImGui::GetTime() - osdTime < 1.5) {
+        ImVec2 wpos = ImGui::GetWindowPos();
+        ImGui::GetForegroundDrawList()->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.6f,
+                                                ImVec2(wpos.x + 20.0f, wpos.y + 20.0f), IM_COL32(255, 220, 0, 255), osdText.c_str());
+    }
+
+    if (showShortcutHelp) {
+        static const char* shortcutList[][2] = {
+            { "Q", "Squelch on / off" },
+            { "Up / Down", "Squelch level +/- 1 dB (Shift: 5 dB)" },
+            { "Left / Right", "Tune by snap interval (Shift: x10, Ctrl: x100)" },
+            { ", / .", "Previous / next bookmark (Frequency Manager)" },
+            { "1 ... 8", "Mode NFM, WFM, AM, DSB, USB, CW, LSB, RAW" },
+            { "[ / ]", "Narrower / wider bandwidth" },
+            { "G / Shift+G", "RF gain up / down (RTL-SDR)" },
+            { "Space", "Mute / unmute audio" },
+            { "R", "Start / stop recording" },
+            { "S", "Start / stop scanner" },
+            { "Z / X", "Zoom waterfall in / out" },
+            { "End", "Play / stop" },
+            { "Home", "Show / hide waterfall" },
+            { "F1", "Show / hide this list" },
+        };
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::Begin("Keyboard shortcuts", &showShortcutHelp, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+            if (ImGui::BeginTable("##sdrpp_shortcut_table", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders)) {
+                for (auto& sc : shortcutList) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(sc[0]);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(sc[1]);
+                }
+                ImGui::EndTable();
+            }
+        }
+        ImGui::End();
+    }
+
     ImGui::EndChild();
 
     if (!lockWaterfallControls) {
         // Handle arrow keys
         if (vfo != NULL && (gui::waterfall.mouseInFFT || gui::waterfall.mouseInWaterfall)) {
             bool freqChanged = false;
+            // Arrow step: Shift = 10x snap interval, Ctrl = 100x snap interval
+            double arrowStep = vfo->snapInterval;
+            if (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift)) { arrowStep *= 10.0; }
+            if (ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl)) { arrowStep *= 100.0; }
             if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !gui::freqSelect.digitHovered) {
-                double nfreq = gui::waterfall.getCenterFrequency() + vfo->generalOffset - vfo->snapInterval;
+                double nfreq = gui::waterfall.getCenterFrequency() + vfo->generalOffset - arrowStep;
                 nfreq = roundl(nfreq / vfo->snapInterval) * vfo->snapInterval;
                 tuner::tune(tuningMode, gui::waterfall.selectedVFO, nfreq);
                 freqChanged = true;
             }
             if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !gui::freqSelect.digitHovered) {
-                double nfreq = gui::waterfall.getCenterFrequency() + vfo->generalOffset + vfo->snapInterval;
+                double nfreq = gui::waterfall.getCenterFrequency() + vfo->generalOffset + arrowStep;
                 nfreq = roundl(nfreq / vfo->snapInterval) * vfo->snapInterval;
                 tuner::tune(tuningMode, gui::waterfall.selectedVFO, nfreq);
                 freqChanged = true;
@@ -572,6 +618,99 @@ void MainWindow::draw() {
                     core::configManager.conf["vfoOffsets"][gui::waterfall.selectedVFO] = vfo->generalOffset;
                 }
                 core::configManager.release(true);
+            }
+        }
+
+        // Squelch shortcuts for the selected radio VFO:
+        //   Q = squelch on/off (power squelch), Up/Down or Keypad +/- = level 1 dB (Shift = 5 dB)
+        bool radioSelected = !gui::waterfall.selectedVFO.empty() && core::modComManager.getModuleName(gui::waterfall.selectedVFO) == "radio";
+        if (shortcutsAllowed() && radioSelected) {
+            const std::string vfoName = gui::waterfall.selectedVFO;
+            const int SQL_OFF = 0, SQL_POWER = 1; // SquelchMode values from decoder_modules/radio/src/demod.h
+            int sqlMode = SQL_OFF;
+            float sqlLevel = 0.0f;
+            core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_GET_SQUELCH_MODE, NULL, &sqlMode);
+            core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_GET_SQUELCH_LEVEL, NULL, &sqlLevel);
+
+            float delta = 0.0f;
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) { delta = 1.0f; }
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) { delta = -1.0f; }
+            if (delta != 0.0f && (ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift))) { delta *= 5.0f; }
+
+            bool sqlChanged = false;
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+                sqlMode = (sqlMode == SQL_OFF) ? SQL_POWER : SQL_OFF;
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_SET_SQUELCH_MODE, &sqlMode, NULL);
+                sqlChanged = true;
+            }
+            if (delta != 0.0f) {
+                // Changing the level also turns the power squelch on
+                if (sqlMode == SQL_OFF) {
+                    sqlMode = SQL_POWER;
+                    core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_SET_SQUELCH_MODE, &sqlMode, NULL);
+                }
+                sqlLevel += delta;
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_SET_SQUELCH_LEVEL, &sqlLevel, NULL);
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_GET_SQUELCH_LEVEL, NULL, &sqlLevel);
+                sqlChanged = true;
+            }
+            if (sqlChanged) {
+                char buf[128];
+                if (sqlMode == SQL_OFF) { snprintf(buf, sizeof(buf), "Squelch OFF"); }
+                else { snprintf(buf, sizeof(buf), "Squelch %.0f dB", sqlLevel); }
+                showOsd(buf);
+            }
+
+            // 1..8 = demodulator mode
+            static const char* modeNames[] = { "NFM", "WFM", "AM", "DSB", "USB", "CW", "LSB", "RAW" };
+            for (int i = 0; i < 8; i++) {
+                if (ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_1 + i), false)) {
+                    int mode = i;
+                    core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_SET_MODE, &mode, NULL);
+                    showOsd(std::string("Mode ") + modeNames[i]);
+                }
+            }
+
+            // [ / ] = narrower / wider bandwidth
+            bool bwNarrow = ImGui::IsKeyPressed(ImGuiKey_LeftBracket);
+            bool bwWide = ImGui::IsKeyPressed(ImGuiKey_RightBracket);
+            if (bwNarrow || bwWide) {
+                float bandwidth = 0.0f;
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_GET_BANDWIDTH, NULL, &bandwidth);
+                float newBandwidth = bwWide ? bandwidth * 1.25f : bandwidth / 1.25f;
+                newBandwidth = std::max<float>(100.0f, roundf(newBandwidth / 100.0f) * 100.0f);
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_SET_BANDWIDTH, &newBandwidth, NULL);
+                core::modComManager.callInterface(vfoName, RADIO_IFACE_CMD_GET_BANDWIDTH, NULL, &newBandwidth);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Bandwidth %.1f kHz", newBandwidth / 1000.0f);
+                showOsd(buf);
+            }
+
+            // Space = mute / unmute the audio of the selected VFO
+            if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
+                bool muted = sigpath::sinkManager.toggleStreamMute(vfoName);
+                showOsd(muted ? "Audio MUTED" : "Audio ON");
+            }
+        }
+
+        if (shortcutsAllowed()) {
+            // Z / X = zoom the waterfall in / out (same mapping as the zoom slider)
+            bool zoomIn = ImGui::IsKeyPressed(ImGuiKey_Z);
+            bool zoomOut = ImGui::IsKeyPressed(ImGuiKey_X);
+            if (zoomIn || zoomOut) {
+                bw = std::clamp<float>(bw + (zoomIn ? -0.1f : 0.1f), 0.0f, 1.0f);
+                double factor = (double)bw * (double)bw;
+                double wfBw = gui::waterfall.getBandwidth();
+                double finalBw = std::min<double>(1000.0 + (factor * (wfBw - 1000.0)), wfBw);
+                gui::waterfall.setViewBandwidth(finalBw);
+                if (vfo != NULL) {
+                    gui::waterfall.setViewOffset(vfo->centerOffset);
+                }
+            }
+
+            // F1 = show / hide the shortcut list
+            if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+                showShortcutHelp = !showShortcutHelp;
             }
         }
 
@@ -704,4 +843,13 @@ bool MainWindow::isPlaying() {
 
 void MainWindow::setFirstMenuRender() {
     firstMenuRender = true;
+}
+
+bool MainWindow::shortcutsAllowed() {
+    return !lockWaterfallControls && !ImGui::GetIO().WantTextInput && !gui::freqSelect.digitHovered;
+}
+
+void MainWindow::showOsd(std::string text) {
+    osdText = text;
+    osdTime = ImGui::GetTime();
 }

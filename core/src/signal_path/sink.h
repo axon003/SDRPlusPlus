@@ -103,6 +103,9 @@ public:
 
     void showVolumeSlider(std::string name, std::string prefix, float width, float btnHeight = -1.0f, int btnBorder = 0, bool sameLine = false);
 
+    // Toggle the mute state of a stream, returns the new state (false if the stream does not exist)
+    bool toggleStreamMute(std::string name);
+
     dsp::stream<dsp::stereo_t>* bindStream(std::string name);
     void unbindStream(std::string name, dsp::stream<dsp::stereo_t>* stream);
 

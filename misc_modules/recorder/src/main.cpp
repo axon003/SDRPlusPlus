@@ -118,10 +118,15 @@ public:
 
         gui::menu.registerEntry(name, menuHandler, this);
         core::modComManager.registerInterface("recorder", name, moduleInterfaceHandler, this);
+
+        keyHandler.ctx = this;
+        keyHandler.handler = shortcutHandler;
+        gui::waterfall.onFFTRedraw.bindHandler(&keyHandler);
     }
 
     ~RecorderModule() {
         std::lock_guard<std::recursive_mutex> lck(recMtx);
+        gui::waterfall.onFFTRedraw.unbindHandler(&keyHandler);
         core::modComManager.unregisterInterface(name);
         gui::menu.removeEntry(name);
         stop();
@@ -162,6 +167,22 @@ public:
     bool isEnabled() {
         return enabled;
     }
+
+    // Keyboard shortcut: R = start / stop recording
+    static void shortcutHandler(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
+        RecorderModule* _this = (RecorderModule*)ctx;
+        if (!_this->enabled || !gui::mainWindow.shortcutsAllowed() || !ImGui::IsKeyPressed(ImGuiKey_R, false)) { return; }
+        if (_this->recording) {
+            _this->stop();
+            gui::mainWindow.showOsd("Recording STOPPED");
+        }
+        else {
+            _this->start();
+            gui::mainWindow.showOsd(_this->recording ? "RECORDING" : "Recording failed (check the Recorder menu)");
+        }
+    }
+
+    EventHandler<ImGui::WaterFall::FFTRedrawArgs> keyHandler;
 
     void start() {
         std::lock_guard<std::recursive_mutex> lck(recMtx);
