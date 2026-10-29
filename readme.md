@@ -1,5 +1,25 @@
 # SDR++, The bloat-free SDR software<br>
 
+> **Fork with keyboard shortcuts** — branch `shortcuts-squelch-tuning`. Press **F1** in SDR++ to see the list.
+>
+> | Key | Action |
+> |---|---|
+> | `Q` | Squelch on / off (power squelch) |
+> | `Up` / `Down` | Squelch level +/- 1 dB (`Shift`: 5 dB); also turns squelch on |
+> | `Left` / `Right` | Tune by the snap interval (`Shift`: x10, `Ctrl`: x100) |
+> | `,` / `.` | Previous / next bookmark of the selected Frequency Manager list |
+> | `1` ... `8` | Mode: NFM, WFM, AM, DSB, USB, CW, LSB, RAW |
+> | `[` / `]` | Narrower / wider bandwidth |
+> | `G` / `Shift+G` | RF gain up / down (RTL-SDR source) |
+> | `Space` | Mute / unmute the selected VFO audio |
+> | `R` | Start / stop recording |
+> | `S` | Start / stop the scanner |
+> | `Z` / `X` | Zoom the waterfall in / out |
+> | `F1` | Show / hide the shortcut list |
+>
+> Every action shows a short on-screen notice. Shortcuts are ignored while typing in a text field or on a frequency digit.
+> Windows builds: GitHub Actions artifact `sdrpp_windows_x64` of this branch.
+
 ![Screenshot](https://i.imgur.com/Ter2MQJ.png)
 SDR++ is a cross-platform and open source SDR software with the aim of being bloat free and simple to use.
 
